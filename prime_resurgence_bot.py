@@ -26,6 +26,7 @@ class PrimeRotation:
     rotation_key: str
     name: str
     unique_name: str
+    activation: datetime
     expiry: datetime
 
 
@@ -60,7 +61,22 @@ def save_history(history: set[str]) -> None:
     )
 
 
-def fetch_schedule() -> list[dict[str, Any]]:
+def parse_api_datetime(value: Any, label: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"Missing date in /vaultTrader {label}")
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"Invalid date in /vaultTrader {label}") from error
+
+    if parsed.tzinfo is None:
+        raise ValueError(f"Date has no timezone in /vaultTrader {label}")
+
+    return parsed.astimezone(timezone.utc)
+
+
+def fetch_schedule() -> tuple[list[dict[str, Any]], datetime]:
     response = requests.get(VAULT_TRADER_URL, timeout=20)
     response.raise_for_status()
     payload = response.json()
@@ -70,7 +86,10 @@ def fetch_schedule() -> list[dict[str, Any]]:
     ):
         raise ValueError("Unexpected /vaultTrader response structure")
 
-    return payload["schedule"]
+    initial_start = parse_api_datetime(
+        payload.get("initialStart"), "initialStart"
+    )
+    return payload["schedule"], initial_start
 
 
 def fetch_items() -> list[dict[str, Any]]:
@@ -84,10 +103,23 @@ def fetch_items() -> list[dict[str, Any]]:
     return payload
 
 
-def extract_rotations(schedule: list[dict[str, Any]]) -> list[PrimeRotation]:
+def extract_rotations(
+    schedule: list[dict[str, Any]],
+    initial_start: datetime,
+) -> list[PrimeRotation]:
     rotations_by_key: dict[str, PrimeRotation] = {}
+    schedule_entries = sorted(
+        (
+            (entry, parse_api_datetime(entry.get("expiry"), "schedule expiry"))
+            for entry in schedule
+        ),
+        key=lambda item: item[1],
+    )
+    previous_expiry = initial_start.astimezone(timezone.utc)
 
-    for entry in schedule:
+    for entry, expiry in schedule_entries:
+        activation = previous_expiry
+        previous_expiry = expiry
         unique_name = entry.get("uniqueName")
         if not isinstance(unique_name, str):
             continue
@@ -99,23 +131,9 @@ def extract_rotations(schedule: list[dict[str, Any]]) -> list[PrimeRotation]:
             continue
 
         name = entry.get("item")
-        expiry_value = entry.get("expiry")
-        if not isinstance(name, str) or not isinstance(expiry_value, str):
+        if not isinstance(name, str):
             raise ValueError(f"Incomplete schedule entry for {unique_name}")
 
-        try:
-            expiry = datetime.fromisoformat(
-                expiry_value.replace("Z", "+00:00")
-            )
-        except ValueError as error:
-            raise ValueError(
-                f"Invalid expiry for schedule entry {unique_name}"
-            ) from error
-
-        if expiry.tzinfo is None:
-            raise ValueError(f"Expiry has no timezone for {unique_name}")
-
-        expiry = expiry.astimezone(timezone.utc)
         rotation_key = expiry.isoformat(timespec="milliseconds").replace(
             "+00:00", "Z"
         )
@@ -123,6 +141,7 @@ def extract_rotations(schedule: list[dict[str, Any]]) -> list[PrimeRotation]:
             rotation_key=rotation_key,
             name=name,
             unique_name=unique_name,
+            activation=activation,
             expiry=expiry,
         )
 
@@ -271,17 +290,18 @@ def build_discord_payload(
     for item in equipment:
         weapon_names = ", ".join(item.weapons) or "No matching Prime weapons"
         weapon_sections.append(f"**{item.warframe}**\n{weapon_names}")
-    weapon_list = "\n\n".join(weapon_sections)
+    weapon_list = "\n".join(weapon_sections)
+    activation_timestamp = int(rotation.activation.timestamp())
     expiry_timestamp = int(rotation.expiry.timestamp())
+    spacer = {"name": "\u200b", "value": "\u200b", "inline": False}
 
     return {
         "allowed_mentions": {"parse": []},
         "embeds": [
             {
-                "title": "Prime Resurgence Rotation",
                 "description": (
                     f"**{rotation.name}** is available in "
-                    "the Prime Vault rotation."
+                    "the Prime Vault rotation.\n\u200b"
                 ),
                 "color": 0xD4AF37,
                 "fields": [
@@ -295,17 +315,18 @@ def build_discord_payload(
                         "value": weapon_list,
                         "inline": True,
                     },
+                    spacer,
                     {
                         "name": "🗓️ ROTATION DATES",
                         "value": (
-                            f"**Available until** <t:{expiry_timestamp}:F>\n"
-                            f"<t:{expiry_timestamp}:R>"
+                            f"**Available from** <t:{activation_timestamp}:F> "
+                            f"(<t:{activation_timestamp}:R>)\n"
+                            f"**Until** <t:{expiry_timestamp}:F> "
+                            f"(<t:{expiry_timestamp}:R>)"
                         ),
                         "inline": False,
                     },
                 ],
-                "footer": {"text": "WARFRAME • PRIME RESURGENCE"},
-                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         ],
     }
@@ -336,8 +357,8 @@ def main() -> None:
     print(f"Loaded {len(history)} published rotation(s).")
 
     try:
-        schedule = fetch_schedule()
-        rotations = extract_rotations(schedule)
+        schedule, initial_start = fetch_schedule()
+        rotations = extract_rotations(schedule, initial_start)
         items = fetch_items()
     except (requests.RequestException, ValueError) as error:
         raise SystemExit(
