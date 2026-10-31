@@ -5,7 +5,6 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
 import requests
 
@@ -13,7 +12,6 @@ import requests
 HISTORY_FILE = Path(__file__).with_name("historique.json")
 VAULT_TRADER_URL = "https://api.warframestat.us/pc/vaultTrader"
 ITEMS_URL = "https://api.warframestat.us/items"
-PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 ENGLISH_MONTHS = (
     "January",
     "February",
@@ -302,18 +300,18 @@ def build_discord_payload(
     warframe_names = "\n".join(
         f"**{item.warframe}**" for item in equipment
     )
-    weapons = sorted(
-        {weapon for item in equipment for weapon in item.weapons}
+    weapon_list = "\n".join(
+        ", ".join(item.weapons) or "No matching Prime weapons"
+        for item in equipment
     )
-    weapon_list = ", ".join(weapons) or "No matching Prime weapons"
     now = datetime.now(timezone.utc)
 
-    def format_paris_datetime(value: datetime) -> str:
-        local_time = value.astimezone(PARIS_TIMEZONE)
-        month = ENGLISH_MONTHS[local_time.month - 1]
+    def format_utc_datetime(value: datetime) -> str:
+        utc_time = value.astimezone(timezone.utc)
+        month = ENGLISH_MONTHS[utc_time.month - 1]
         return (
-            f"{local_time.day} {month} {local_time.year} at "
-            f"{local_time:%H:%M} Paris time"
+            f"{utc_time.day} {month} {utc_time.year} at "
+            f"{utc_time:%H:%M} UTC"
         )
 
     def format_english_relative(value: datetime) -> str:
@@ -342,8 +340,8 @@ def build_discord_payload(
             return f"in {amount} {label}"
         return f"{amount} {label} ago"
 
-    activation_date = format_paris_datetime(rotation.activation)
-    expiry_date = format_paris_datetime(rotation.expiry)
+    activation_date = format_utc_datetime(rotation.activation)
+    expiry_date = format_utc_datetime(rotation.expiry)
     activation_relative = format_english_relative(rotation.activation)
     expiry_relative = format_english_relative(rotation.expiry)
 
@@ -362,7 +360,8 @@ def build_discord_payload(
                         "value": (
                             f"**Available from** {activation_date} "
                             f"({activation_relative})\n"
-                            f"**Until** {expiry_date} ({expiry_relative})"
+                            f"**Until** {expiry_date} "
+                            f"({expiry_relative})\n\u200b"
                         ),
                         "inline": False,
                     },
