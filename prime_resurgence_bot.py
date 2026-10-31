@@ -358,6 +358,15 @@ def build_discord_payload(
                 "color": 0xD4AF37,
                 "fields": [
                     {
+                        "name": "🗓️ ROTATION DATES",
+                        "value": (
+                            f"**Available from** {activation_date} "
+                            f"({activation_relative})\n"
+                            f"**Until** {expiry_date} ({expiry_relative})"
+                        ),
+                        "inline": False,
+                    },
+                    {
                         "name": "✨ WARFRAMES",
                         "value": warframe_names,
                         "inline": True,
@@ -366,15 +375,6 @@ def build_discord_payload(
                         "name": "⚔️ PRIME WEAPONS",
                         "value": weapon_list,
                         "inline": True,
-                    },
-                    {
-                        "name": "🗓️ ROTATION DATES",
-                        "value": (
-                            f"**Available from** {activation_date} "
-                            f"({activation_relative})\n"
-                            f"**Until** {expiry_date} ({expiry_relative})"
-                        ),
-                        "inline": False,
                     },
                 ],
             }
