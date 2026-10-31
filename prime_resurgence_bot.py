@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -12,6 +13,21 @@ import requests
 HISTORY_FILE = Path(__file__).with_name("historique.json")
 VAULT_TRADER_URL = "https://api.warframestat.us/pc/vaultTrader"
 ITEMS_URL = "https://api.warframestat.us/items"
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
+ENGLISH_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
 WEAPON_CATEGORIES = {
     "Primary",
     "Secondary",
@@ -284,16 +300,52 @@ def build_discord_payload(
     equipment: list[PrimeEquipment],
 ) -> dict[str, Any]:
     warframe_names = "\n".join(
-        f"• **{item.warframe}**" for item in equipment
+        f"**{item.warframe}**" for item in equipment
     )
-    weapon_sections = []
-    for item in equipment:
-        weapon_names = ", ".join(item.weapons) or "No matching Prime weapons"
-        weapon_sections.append(f"**{item.warframe}**\n{weapon_names}")
-    weapon_list = "\n".join(weapon_sections)
-    activation_timestamp = int(rotation.activation.timestamp())
-    expiry_timestamp = int(rotation.expiry.timestamp())
-    spacer = {"name": "\u200b", "value": "\u200b", "inline": False}
+    weapons = sorted(
+        {weapon for item in equipment for weapon in item.weapons}
+    )
+    weapon_list = ", ".join(weapons) or "No matching Prime weapons"
+    now = datetime.now(timezone.utc)
+
+    def format_paris_datetime(value: datetime) -> str:
+        local_time = value.astimezone(PARIS_TIMEZONE)
+        month = ENGLISH_MONTHS[local_time.month - 1]
+        return (
+            f"{local_time.day} {month} {local_time.year} at "
+            f"{local_time:%H:%M} Paris time"
+        )
+
+    def format_english_relative(value: datetime) -> str:
+        seconds = int((value - now).total_seconds())
+        if seconds == 0:
+            return "now"
+
+        future = seconds > 0
+        seconds = abs(seconds)
+        if seconds < 60:
+            amount, unit = seconds, "second"
+        elif seconds < 3600:
+            amount, unit = round(seconds / 60), "minute"
+        elif seconds < 86400:
+            amount, unit = round(seconds / 3600), "hour"
+        elif seconds < 2_592_000:
+            amount, unit = round(seconds / 86400), "day"
+        elif seconds < 31_556_952:
+            amount, unit = round(seconds / 2_629_746), "month"
+        else:
+            amount, unit = round(seconds / 31_556_952), "year"
+
+        amount = max(amount, 1)
+        label = unit if amount == 1 else f"{unit}s"
+        if future:
+            return f"in {amount} {label}"
+        return f"{amount} {label} ago"
+
+    activation_date = format_paris_datetime(rotation.activation)
+    expiry_date = format_paris_datetime(rotation.expiry)
+    activation_relative = format_english_relative(rotation.activation)
+    expiry_relative = format_english_relative(rotation.expiry)
 
     return {
         "allowed_mentions": {"parse": []},
@@ -315,14 +367,12 @@ def build_discord_payload(
                         "value": weapon_list,
                         "inline": True,
                     },
-                    spacer,
                     {
                         "name": "🗓️ ROTATION DATES",
                         "value": (
-                            f"**Available from** <t:{activation_timestamp}:F> "
-                            f"(<t:{activation_timestamp}:R>)\n"
-                            f"**Until** <t:{expiry_timestamp}:F> "
-                            f"(<t:{expiry_timestamp}:R>)"
+                            f"**Available from** {activation_date} "
+                            f"({activation_relative})\n"
+                            f"**Until** {expiry_date} ({expiry_relative})"
                         ),
                         "inline": False,
                     },
