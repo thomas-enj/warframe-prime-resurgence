@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -12,6 +13,7 @@ import requests
 HISTORY_FILE = Path(__file__).with_name("historique.json")
 VAULT_TRADER_URL = "https://api.warframestat.us/pc/vaultTrader"
 ITEMS_URL = "https://api.warframestat.us/items"
+PARIS_TIMEZONE = ZoneInfo("Europe/Paris")
 ENGLISH_MONTHS = (
     "January",
     "February",
@@ -306,12 +308,23 @@ def build_discord_payload(
     )
     now = datetime.now(timezone.utc)
 
-    def format_utc_datetime(value: datetime) -> str:
-        utc_time = value.astimezone(timezone.utc)
-        month = ENGLISH_MONTHS[utc_time.month - 1]
+    def format_paris_datetime(value: datetime) -> str:
+        paris_time = value.astimezone(PARIS_TIMEZONE)
+        month = ENGLISH_MONTHS[paris_time.month - 1]
+        utc_offset = paris_time.utcoffset()
+        if utc_offset is None:
+            raise ValueError("Could not determine the Paris UTC offset")
+
+        offset_minutes = int(utc_offset.total_seconds() // 60)
+        offset_sign = "+" if offset_minutes >= 0 else "-"
+        offset_hours, remaining_minutes = divmod(abs(offset_minutes), 60)
+        offset_label = f"UTC{offset_sign}{offset_hours}"
+        if remaining_minutes:
+            offset_label += f":{remaining_minutes:02}"
+
         return (
-            f"{utc_time.day} {month} {utc_time.year} at "
-            f"{utc_time:%H:%M} UTC"
+            f"{paris_time.day} {month} {paris_time.year} at "
+            f"{paris_time:%H:%M} {offset_label}"
         )
 
     def format_english_relative(value: datetime) -> str:
@@ -340,8 +353,8 @@ def build_discord_payload(
             return f"in {amount} {label}"
         return f"{amount} {label} ago"
 
-    activation_date = format_utc_datetime(rotation.activation)
-    expiry_date = format_utc_datetime(rotation.expiry)
+    activation_date = format_paris_datetime(rotation.activation)
+    expiry_date = format_paris_datetime(rotation.expiry)
     activation_relative = format_english_relative(rotation.activation)
     expiry_relative = format_english_relative(rotation.expiry)
 
