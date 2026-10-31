@@ -1,0 +1,49 @@
+name: Check Prime Resurgence
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: prime-resurgence-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check-resurgence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Check Prime Resurgence
+        run: python prime_resurgence_bot.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: Commit and push history
+        run: |
+          if git diff --quiet -- historique.json; then
+            echo "No history changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add historique.json
+          git commit -m "Update Prime Resurgence history"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
