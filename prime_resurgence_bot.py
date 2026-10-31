@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -272,6 +273,77 @@ def find_prime_equipment(
     ]
 
 
+def build_discord_payload(
+    rotation: PrimeRotation,
+    equipment: list[PrimeEquipment],
+) -> dict[str, Any]:
+    warframe_names = "\n".join(
+        f"• **{item.warframe}**" for item in equipment
+    )
+    weapon_sections = []
+    for item in equipment:
+        weapon_names = ", ".join(item.weapons) or "No matching Prime weapons"
+        weapon_sections.append(f"**{item.warframe}**\n{weapon_names}")
+    weapon_list = "\n\n".join(weapon_sections)
+    expiry_timestamp = int(rotation.expiry.timestamp())
+
+    return {
+        "allowed_mentions": {"parse": []},
+        "embeds": [
+            {
+                "title": "Prime Resurgence Rotation",
+                "description": (
+                    f"**{rotation.name}** is available in "
+                    "the Prime Vault rotation."
+                ),
+                "color": 0xD4AF37,
+                "fields": [
+                    {
+                        "name": "✨ WARFRAMES",
+                        "value": warframe_names,
+                        "inline": True,
+                    },
+                    {
+                        "name": "⚔️ PRIME WEAPONS",
+                        "value": weapon_list,
+                        "inline": True,
+                    },
+                    {
+                        "name": "🗓️ ROTATION DATES",
+                        "value": (
+                            f"**Available until** <t:{expiry_timestamp}:F>\n"
+                            f"<t:{expiry_timestamp}:R>"
+                        ),
+                        "inline": False,
+                    },
+                ],
+                "footer": {"text": "WARFRAME • PRIME RESURGENCE"},
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        ],
+    }
+
+
+def send_discord_webhook(payload: dict[str, Any]) -> None:
+    webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+    if not webhook_url:
+        raise ValueError(
+            "The DISCORD_WEBHOOK_URL environment variable is missing"
+        )
+
+    try:
+        response = requests.post(webhook_url, json=payload, timeout=20)
+    except requests.RequestException as error:
+        raise RuntimeError(
+            f"Discord webhook request failed ({type(error).__name__})"
+        ) from None
+
+    if not response.ok:
+        raise RuntimeError(
+            f"Discord webhook returned HTTP {response.status_code}"
+        )
+
+
 def main() -> None:
     history = load_history()
     print(f"Loaded {len(history)} published rotation(s).")
@@ -294,14 +366,25 @@ def main() -> None:
         print("No rotation is ready; the previous rotation is not in history.")
         return
 
-    print(
-        f"Next rotation: {rotation.name} | "
-        f"expires {rotation.rotation_key} | "
-        f"key {rotation.rotation_key}"
-    )
-    for equipment in find_prime_equipment(rotation, items):
-        weapons = ", ".join(equipment.weapons) or "No matching Prime weapons"
-        print(f"  {equipment.warframe}: {weapons}")
+    try:
+        equipment = find_prime_equipment(rotation, items)
+        payload = build_discord_payload(rotation, equipment)
+        send_discord_webhook(payload)
+    except (requests.RequestException, RuntimeError, ValueError) as error:
+        raise SystemExit(
+            f"Could not publish the Prime Resurgence alert: {error}"
+        )
+
+    history.add(rotation.rotation_key)
+    try:
+        save_history(history)
+    except OSError:
+        raise SystemExit(
+            "The Discord alert was sent, but "
+            "historique.json could not be saved."
+        ) from None
+
+    print(f"Published and recorded rotation: {rotation.name}")
 
 
 if __name__ == "__main__":
