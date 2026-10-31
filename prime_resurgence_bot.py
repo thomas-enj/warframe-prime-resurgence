@@ -139,26 +139,13 @@ def extract_rotations(schedule: list[dict[str, Any]]) -> list[PrimeRotation]:
 def select_next_rotation(
     rotations: list[PrimeRotation],
     history: set[str],
-    now: datetime | None = None,
 ) -> PrimeRotation | None:
-    current_time = now or datetime.now(timezone.utc)
-    if current_time.tzinfo is None:
-        raise ValueError("The current time must include a timezone")
-    current_time = current_time.astimezone(timezone.utc)
-
     ordered_rotations = sorted(rotations, key=lambda item: item.expiry)
     if not history:
-        return next(
-            (
-                rotation
-                for rotation in ordered_rotations
-                if rotation.expiry > current_time
-            ),
-            None,
-        )
+        return ordered_rotations[0] if ordered_rotations else None
 
     for index, rotation in enumerate(ordered_rotations):
-        if rotation.expiry <= current_time or rotation.rotation_key in history:
+        if rotation.rotation_key in history:
             continue
         if index == 0:
             return None
