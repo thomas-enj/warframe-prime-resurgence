@@ -306,7 +306,6 @@ def build_discord_payload(
         ", ".join(item.weapons) or "No matching Prime weapons"
         for item in equipment
     )
-    now = datetime.now(timezone.utc)
 
     def format_paris_datetime(value: datetime) -> str:
         paris_time = value.astimezone(PARIS_TIMEZONE)
@@ -327,36 +326,10 @@ def build_discord_payload(
             f"{paris_time:%H:%M} {offset_label}"
         )
 
-    def format_english_relative(value: datetime) -> str:
-        seconds = int((value - now).total_seconds())
-        if seconds == 0:
-            return "now"
-
-        future = seconds > 0
-        seconds = abs(seconds)
-        if seconds < 60:
-            amount, unit = seconds, "second"
-        elif seconds < 3600:
-            amount, unit = round(seconds / 60), "minute"
-        elif seconds < 86400:
-            amount, unit = round(seconds / 3600), "hour"
-        elif seconds < 2_592_000:
-            amount, unit = round(seconds / 86400), "day"
-        elif seconds < 31_556_952:
-            amount, unit = round(seconds / 2_629_746), "month"
-        else:
-            amount, unit = round(seconds / 31_556_952), "year"
-
-        amount = max(amount, 1)
-        label = unit if amount == 1 else f"{unit}s"
-        if future:
-            return f"in {amount} {label}"
-        return f"{amount} {label} ago"
-
     activation_date = format_paris_datetime(rotation.activation)
     expiry_date = format_paris_datetime(rotation.expiry)
-    activation_relative = format_english_relative(rotation.activation)
-    expiry_relative = format_english_relative(rotation.expiry)
+    activation_relative = f"<t:{int(rotation.activation.timestamp())}:R>"
+    expiry_relative = f"<t:{int(rotation.expiry.timestamp())}:R>"
 
     return {
         "allowed_mentions": {"parse": []},
