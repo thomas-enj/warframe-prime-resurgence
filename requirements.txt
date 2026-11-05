@@ -1,2 +1,2 @@
-requests>=2.32,<3.0
-tzdata>=2024.1
+requests>=2.34.2,<3.0
+tzdata>=2026.6
